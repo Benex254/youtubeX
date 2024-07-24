@@ -1,0 +1,219 @@
+#!/usr/bin/env bash
+
+# ---- constants -----
+APP_NAME="ytx"
+
+APP_CACHE_DIR="$HOME/.cache/$APP_NAME"
+SEARCH_RESULTS_DIR="$APP_CACHE_DIR/search_results"
+SEARCH_THUMBNAILS_DIR="$SEARCH_RESULTS_DIR/thumbnails"
+DESCRIPTIONS_DIR="$SEARCH_RESULTS_DIR/descriptions"
+
+SEARCH_RESULTS="$SEARCH_RESULTS_DIR/results.json"
+SEARCH_TITLES="$SEARCH_RESULTS_DIR/titles.txt"
+CURRENT_SEARCH_RESULT="$SEARCH_RESULTS_DIR/current_index.txt"
+SEARCH_RESULTS_IDS="$SEARCH_RESULTS_DIR/ids.txt"
+SEARCH_THUMBNAILS="$SEARCH_RESULTS_DIR/thumbnails.txt"
+SEARCH_THUMBNAIL_URLS="$SEARCH_RESULTS_DIR/thumbnail_urls.txt"
+SEARCH_VIDEO_URLS="$SEARCH_RESULTS_DIR/video_urls.txt"
+
+load_config() {
+  FZF_DEFAULT_OPTS=$FZF_DEFAULT_OPTS'
+  --reverse
+  --cycle
+  --color=fg:#d0d0d0,fg+:#d0d0d0,bg:#121212,bg+:#262626
+  --color=hl:#5f87af,hl+:#5fd7ff,info:#afaf87,marker:#87ff00
+  --color=prompt:#d7005f,spinner:#af5fff,pointer:#af5fff,header:#87afaf
+  --color=border:#262626,label:#aeaeae,query:#d9d9d9
+  --border="rounded" --border-label="" --preview-window="border-rounded" --prompt="> "
+  --marker=">" --pointer="◆" --separator="─" --scrollbar="│"'
+}
+
+ensure_paths() {
+  ! [[ -d $SEARCH_RESULTS_DIR ]] || mkdir -p "$SEARCH_RESULTS_DIR"
+  ! [[ -d $THUMBNAILS_DIR ]] || mkdir -p "$THUMBNAILS_DIR"
+
+}
+
+extract_data() {
+  I=$(echo "$1" | sed -E 's/^([0-9]+).*/\1/')
+  head -"$I" <"$2" | tail +"$I"
+}
+
+prompt_user() {
+  if [ -x "$(command -v gum)" ]; then
+    value=$(gum input --placeholder "$1")
+    echo "$value"
+  else
+    echo "$1"
+    value=$(read -r)
+    echo "$value"
+  fi
+}
+
+run_yt_dlp() {
+  if [ -x "$(command -v gum)" ]; then
+    gum spin -- yt-dlp "$1" -J --flat-playlist --playlist-start 1 --playlist-end 40 --cookies-from-browser chrome
+  else
+    echo "Loading..."
+    yt-dlp "$1" -J --flat-playlist --playlist-start 1 --playlist-end 40 --cookies-from-browser chrome
+  fi
+
+}
+parse_values() {
+
+  cat -n "$1" | sed 's/^. *//g'
+}
+
+select_search_result() {
+
+  TITLE=$(parse_values "$SEARCH_TITLES" | fzf --cycle --reverse --prompt "Watch: " --header="$HEADER" --header-first --exact -i --layout=reverse)
+
+  # --- stream with mpv ---
+  URL=$(extract_data "$TITLE" "$SEARCH_VIDEO_URLS")
+
+  SELECT=true
+  while "$SELECT"; do
+
+    video_actions
+    SELECT=$(gum confirm)
+  done
+}
+
+video_player() {
+  # TODO: Add mobile support
+  mpv "$URL"
+}
+
+download_video() {
+  yt-dlp "$URL"
+}
+
+video_actions() {
+  ACTION=$(echo -e "watch\ndownload" | fzf)
+  case "$ACTION" in
+  watch)
+    video_player
+    ;;
+  download)
+    download
+    ;;
+  esac
+}
+search_youtube() {
+  clear
+  SEARCH_TERM=$(prompt_user "Search for...")
+  YT_URL="https://www.youtube.com/results?search_query=$SEARCH_TERM&sp=EgIQAQ%253D%253D"
+  run_yt_dlp "$YT_URL" >"$SEARCH_RESULTS"
+  # --- parse results ---
+  jq '.entries[].id' "$SEARCH_RESULTS" -r >"$SEARCH_RESULTS_IDS"
+  jq '.entries[].title' "$SEARCH_RESULTS" -r >"$SEARCH_TITLES"
+  jq '.entries[].url' "$SEARCH_RESULTS" -r >"$SEARCH_VIDEO_URLS"
+
+  # --- select video ---
+
+  HEADER=$(figlet "YTX")
+  select_search_result
+
+}
+
+liked_videos() {
+  clear
+  YT_URL="https://www.youtube.com/playlist?list=LL"
+  run_yt_dlp "$YT_URL" >"$SEARCH_RESULTS"
+  # --- parse results ---
+  jq '.entries[].id' "$SEARCH_RESULTS" -r >"$SEARCH_RESULTS_IDS"
+  jq '.entries[].title' "$SEARCH_RESULTS" -r >"$SEARCH_TITLES"
+  jq '.entries[].url' "$SEARCH_RESULTS" -r >"$SEARCH_VIDEO_URLS"
+
+  # --- select video ---
+
+  HEADER=$(figlet "YTX")
+  select_search_result
+}
+
+watch_later() {
+  clear
+  YT_URL="https://www.youtube.com/playlist?list=WL"
+  run_yt_dlp "$YT_URL" >"$SEARCH_RESULTS"
+  # --- parse results ---
+  jq '.entries[].id' "$SEARCH_RESULTS" -r >"$SEARCH_RESULTS_IDS"
+  jq '.entries[].title' "$SEARCH_RESULTS" -r >"$SEARCH_TITLES"
+  jq '.entries[].url' "$SEARCH_RESULTS" -r >"$SEARCH_VIDEO_URLS"
+
+  # --- select video ---
+
+  HEADER=$(figlet "YTX")
+  select_search_result
+
+}
+
+yt_history() {
+  clear
+  YT_URL="https://www.youtube.com/feed/history"
+  run_yt_dlp "$YT_URL" >"$SEARCH_RESULTS"
+  # --- parse results ---
+  jq '.entries[].id' "$SEARCH_RESULTS" -r >"$SEARCH_RESULTS_IDS"
+  jq '.entries[].title' "$SEARCH_RESULTS" -r >"$SEARCH_TITLES"
+  jq '.entries[].url' "$SEARCH_RESULTS" -r >"$SEARCH_VIDEO_URLS"
+
+  # --- select video ---
+
+  HEADER=$(figlet "YTX")
+  select_search_result
+
+}
+
+trending() {
+  clear
+  YT_URL="https://www.youtube.com/feed/trending"
+  run_yt_dlp "$YT_URL" >"$SEARCH_RESULTS"
+  # --- parse results ---
+  jq '.entries[].id' "$SEARCH_RESULTS" -r >"$SEARCH_RESULTS_IDS"
+  jq '.entries[].title' "$SEARCH_RESULTS" -r >"$SEARCH_TITLES"
+  jq '.entries[].url' "$SEARCH_RESULTS" -r >"$SEARCH_VIDEO_URLS"
+
+  # --- select video ---
+
+  HEADER=$(figlet "YTX")
+  select_search_result
+
+}
+
+subscriptions_feed() {
+  clear
+  YT_URL="https://www.youtube.com/feed/subscriptions"
+  run_yt_dlp "$YT_URL" >"$SEARCH_RESULTS"
+  # --- parse results ---
+  jq '.entries[].id' "$SEARCH_RESULTS" -r >"$SEARCH_RESULTS_IDS"
+  jq '.entries[].title' "$SEARCH_RESULTS" -r >"$SEARCH_TITLES"
+  jq '.entries[].url' "$SEARCH_RESULTS" -r >"$SEARCH_VIDEO_URLS"
+
+  # --- select video ---
+
+  HEADER=$(figlet "YTX")
+  select_search_result
+
+}
+load_config
+RUN_YTX=true
+export FZF_DEFAULT_OPTS
+main() {
+  YTX_OPTS=$(echo -e "subscriptions\nsearch\nliked videos\ntrending" | fzf)
+  # YTX_OPT=$(echo "$YTX_OPTS" | sed -E 's/(.*)/\1/')
+  # echo $YTX_OPT
+  case "$YTX_OPTS" in
+  search)
+    search_youtube
+    ;;
+  "liked videos")
+    liked_videos
+    ;;
+  "subscriptions")
+    subscriptions_feed
+    ;;
+  "trending")
+    trending
+    ;;
+  esac
+}
+main
